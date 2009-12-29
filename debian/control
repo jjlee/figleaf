@@ -9,6 +9,6 @@ Vcs-Browser: http://github.com/jjlee/python-figleaf
 
 Package: python-figleaf
 Architecture: all
-Depends: ${misc:Depends}, ${python:Depends}, python-pkg-resources
+Depends: ${misc:Depends}, ${python:Depends}, python-setuptools
 Description: Code coverage reporting and analysis for Python
  This is figleaf, a code coverage recording and analysis package for Python.
