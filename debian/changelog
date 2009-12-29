@@ -1,9 +1,10 @@
-python-figleaf (0.6.1-0ubuntu1~ppa2) karmic; urgency=low
+python-figleaf (0.6.1.dev-20091230-0ubuntu1~ppa1) karmic; urgency=low
 
   * Fix python-setuptools dependency.
-  * Rebuild after git rebase.
+  * Fix debian version and use pristine-tar.
+  * git rebase.
 
- -- John Lee <jjl@pobox.com>  Tue, 29 Dec 2009 22:05:53 +0000
+ -- John Lee <jjl@pobox.com>  Wed, 30 Dec 2009 15:05:23 +0000
 
 python-figleaf (0.6.1-0ubuntu1~ppa1) karmic; urgency=low
 
