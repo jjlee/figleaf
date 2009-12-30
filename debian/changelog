@@ -1,3 +1,10 @@
+python-figleaf (0.6.1.dev-20091230-1-0ubuntu1~ppa1) karmic; urgency=low
+
+  * Sigh.  PPA refuses to remove useless .orig.tar.gz, add yet another
+    component to version.
+
+ -- John Lee <jjl@pobox.com>  Wed, 30 Dec 2009 17:14:14 +0000
+
 python-figleaf (0.6.1.dev-20091230-0ubuntu1~ppa3) karmic; urgency=low
 
   * Rebuild after deleting ppa2 (oops, forgot to push the pristine-tar

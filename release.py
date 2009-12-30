@@ -102,19 +102,27 @@ def split_debian_version(debian_version):
 
 
 def next_debian_version(version):
-    # update the date, and set appropriate N in ppaN suffix
-    upstream_version, sep1, debian_version = split_debian_version(version)
-    rest, sep2, date = upstream_version.rpartition("-")
+    # Update the date and a build number in upstream version.  Set ppa build
+    # number to 1.
+    # If you're rebuilding from unchanged .orig.tar.gz, then you need to run
+    # dch -e to edit the changelog by hand to set appropriate N in ppaN suffix
+    # and change the build_num in upstream version back to the version you
+    # want.  TODO: add a commandline option to specifiy upstream version to
+    # use, and do this automatically.
+    upstream_version, sep, debian_version = split_debian_version(version)
+    rest, date, build_num = upstream_version.rsplit("-", 2)
     assert len(date) == 8, date
     assert rest.endswith(".dev")
     todays_date = datetime.date.today().strftime("%Y%m%d")
-    deb_rest, ppa_sep, ppa_num = debian_version.rpartition("~ppa")
     if date == todays_date:
-        next_ppa_num = int(ppa_num) + 1
+        next_build_num = int(build_num) + 1
     else:
-        next_ppa_num = 1
+        next_build_num = 0
+    deb_rest, ppa_sep, ppa_num = debian_version.rpartition("~ppa")
+    next_ppa_num = 1
     debian_version = "".join([deb_rest, ppa_sep, str(next_ppa_num)])
-    return "".join([rest, sep2, todays_date, sep1, debian_version])
+    return "".join([rest, "-", todays_date, "-", str(next_build_num),
+                    sep, debian_version])
 
 
 class Releaser(object):
@@ -158,6 +166,9 @@ class Releaser(object):
                                      cmd_env.PrefixCmdEnv(["sudo"], self._env),
                                      package_name, ppa)
         ensure_installed("build-essential")
+        # TODO: does git-buildpackage satisfy build deps?  If not, should
+        # probably replace this line with ensure_installed("pbuilder"), and
+        # make this script run /usr/lib/pbuilder/pbuilder-satisfydepends
         ensure_installed("git-buildpackage")
 
     def clean(self, log):
@@ -248,11 +259,14 @@ allow_unsigned_uploads = 0
 
     @action_tree.action_node
     def all(self):
+        # TODO: use a subdirectory of work dir, not hard-coded /tmp path (think
+        # I was being paranoid about possible pbuilder chroot cleanup bugs)
         work_dir = "/tmp/figleaf-test"
         test = buildtools.testdeb.PbuilderActions(self._env, work_dir,
                                                   self._get_deb_path,
                                                   test=Test())
         return [
+            self.install_deps,
             self.clean,
             self.clone,
             self.print_next_tag,
