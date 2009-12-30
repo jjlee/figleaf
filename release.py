@@ -13,6 +13,7 @@ of RELEASE_AREA.  Other actions install software.
 # git://github.com/jjlee/mechanize-build-tools.git
 
 import cStringIO as StringIO
+import datetime
 import optparse
 import os
 import rfc822
@@ -23,14 +24,6 @@ import cmd_env
 
 import buildtools.release as release
 import buildtools.testdeb
-
-
-# Taken from git-buildpackage.  Should really use --git-posttag to record
-# actual tag name rather than assuming this won't change.
-def sanitize_version(version):
-    if ':' in version: # strip of any epochs
-        version = version.split(':', 1)[1]
-    return version.replace('~', '.')
 
 
 class Test(object):
@@ -74,11 +67,59 @@ file stats: <b>3 lines, 2 executed: 66.7% covered</b>
 """
 
 
+# Taken from git-buildpackage.  Should really use --git-posttag to record
+# actual tag name rather than assuming this won't change.
+def sanitize_version(version):
+    if ':' in version: # strip of any epochs
+        version = version.split(':', 1)[1]
+    return version.replace('~', '.')
+
+
+def _git_buildpackage_cmd(branch):
+    return ["git-buildpackage",
+            "--git-upstream-branch=%s" % branch,
+            "--git-debian-branch=%s" % branch,
+            ]
+
+
+def git_buildpackage_build_cmd(branch, key):
+    return _git_buildpackage_cmd(branch) + [
+        "--git-pristine-tar",
+        "-k%s" % key,  # for signing packages
+        ]
+
+
+def git_buildpackage_tag_cmd(branch, key):
+    return _git_buildpackage_cmd(branch) + [
+        "--git-tag-only",
+        "--git-sign-tags",
+        "--git-keyid=%s" % key,  # for signing tags
+        ]
+
+
+def split_debian_version(debian_version):
+    return debian_version.rpartition("-")
+
+
+def next_debian_version(version):
+    # update the date, and set appropriate N in ppaN suffix
+    upstream_version, sep1, debian_version = split_debian_version(version)
+    rest, sep2, date = upstream_version.rpartition("-")
+    assert len(date) == 8, date
+    assert rest.endswith(".dev")
+    todays_date = datetime.date.today().strftime("%Y%m%d")
+    deb_rest, ppa_sep, ppa_num = debian_version.rpartition("~ppa")
+    if date == todays_date:
+        next_ppa_num = int(ppa_num) + 1
+    else:
+        next_ppa_num = 1
+    debian_version = "".join([deb_rest, ppa_sep, str(next_ppa_num)])
+    return "".join([rest, sep2, todays_date, sep1, debian_version])
+
+
 class Releaser(object):
 
-    key = "A362A9D1"
-
-    def __init__(self, env, git_repository_path, release_dir, branch,
+    def __init__(self, env, git_repository_path, release_dir, branch, key,
                  run_in_repository=False):
         self._env = release.GitPagerWrapper(env)
         self._source_repo_path = git_repository_path
@@ -103,6 +144,14 @@ class Releaser(object):
         [version] = message.getheaders("Version")
         return version
 
+    def _get_from_git_config(self, name):
+        value = release.get_cmd_stdout(self._in_repo,
+                                       ["git", "config", "--get", name])
+        return release.trim(value, "\n")
+
+    def _get_key(self):
+        return self._get_from_git_config("user.signingkey")
+
     def install_deps(self, log):
         def ensure_installed(package_name, ppa=None):
             release.ensure_installed(self._env,
@@ -110,9 +159,6 @@ class Releaser(object):
                                      package_name, ppa)
         ensure_installed("build-essential")
         ensure_installed("git-buildpackage")
-
-    def print_next_tag(self, log):
-        print self._get_version_from_changelog()
 
     def clean(self, log):
         self._env.cmd(release.rm_rf_cmd(self._release_dir))
@@ -122,23 +168,48 @@ class Releaser(object):
                        self._source_repo_path, self._clone_path])
         self._in_clone.cmd(["git", "checkout", self._branch])
 
-    def build(self, log):
-        self._in_repo.cmd(["git-buildpackage",
-                           "--git-upstream-branch=%s" % self._branch,
-                           "--git-debian-branch=%s" % self._branch,
-                           "--git-tag",
-                           "--git-sign-tags",
-                           "--git-keyid=%s" % self.key,  # for signing tags
-                           "-k%s" % self.key,  # for signing packages
-                           ])
+    def print_next_tag(self, log):
+        print next_debian_version(self._get_version_from_changelog())
 
-    def build_source_package(self, log):
-        self._in_repo.cmd(["git-buildpackage",
-                           "--git-upstream-branch=%s" % self._branch,
-                           "--git-debian-branch=%s" % self._branch,
-                           "-S",
-                           "-k%s" % self.key,  # for signing packages
-                           ])
+    def update_changelog(self, log):
+        version = next_debian_version(self._get_version_from_changelog())
+        name = self._get_from_git_config("user.name")
+        email = self._get_from_git_config("user.email")
+        entry = "Automated release."
+        self._in_repo.cmd([
+                "env", "DEBFULLNAME=%s" % name, "DEBEMAIL=%s" % email,
+                "dch", "--newversion", version, entry])
+
+    def commit_changelog(self, log):
+        self._in_repo.cmd(["git", "commit", "-m", "Update changelog",
+                           "debian/changelog"])
+
+    def tag(self, log):
+        self._in_repo.cmd(
+            git_buildpackage_tag_cmd(self._branch, self._get_key()))
+
+    def pristine_tar(self, log):
+        # TODO: for final release, write empty setup.cfg
+        upstream_branch = self._branch
+        self._in_repo.cmd(["python", "setup.py", "sdist", "--formats=gztar"])
+        [tarball] = os.listdir(os.path.join(self._repo_path, "dist"))
+        version = self._get_version_from_changelog()
+        # rename so that git-buildpackage --pristine-tar finds it
+        # TODO: get source package name from dpkg-parsechangelog
+        source_package_name = "python-figleaf"
+        upstream_version, sep, unused = split_debian_version(version)
+        orig = "%s_%s.orig.tar.gz" % (source_package_name, upstream_version)
+        self._in_repo.cmd(["mv", os.path.join("dist", tarball), orig])
+        self._in_repo.cmd(["pristine-tar", "commit", orig, upstream_branch])
+        self._in_repo.cmd(["rm", orig])
+
+    def build_debian_package(self, log):
+        self._in_repo.cmd(
+            git_buildpackage_build_cmd(self._branch, self._get_key()))
+
+    def build_debian_source_package(self, log):
+        self._in_repo.cmd(
+            git_buildpackage_build_cmd(self._branch, self._get_key()) + ["-S"])
 
     def submit_to_ppa(self, log):
         dput_cf = os.path.join(self._release_dir, "dput.cf")
@@ -181,9 +252,13 @@ allow_unsigned_uploads = 0
             self.clean,
             self.clone,
             self.print_next_tag,
-            self.build,
-            self.build_source_package,
-            ("test", test.all),
+            self.update_changelog,
+            self.commit_changelog,
+            self.tag,
+            self.pristine_tar,
+            self.build_debian_package,
+            self.build_debian_source_package,
+            ("debian_test", test.all),
             self.submit_to_ppa,
             self.push_tag,
             ]
