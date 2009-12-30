@@ -1,3 +1,10 @@
+python-figleaf (0.6.1.dev-20091230-0ubuntu1~ppa2) karmic; urgency=low
+
+  * Fix python-setuptools build dependency and attempt to better follow
+    Debian Python policy.
+
+ -- John Lee <jjl@pobox.com>  Wed, 30 Dec 2009 16:19:42 +0000
+
 python-figleaf (0.6.1.dev-20091230-0ubuntu1~ppa1) karmic; urgency=low
 
   * Fix python-setuptools dependency.
