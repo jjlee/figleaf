@@ -2,10 +2,11 @@ Source: python-figleaf
 Section: python
 Priority: optional
 Maintainer: John Lee <jjl@pobox.com>
-Build-Depends: debhelper (>= 7.3.15ubuntu3), pristine-tar, cdbs, python-dev, python-support
+Build-Depends: debhelper (>= 7.3.15ubuntu3), pristine-tar (>= 1.00), cdbs, python-all-dev (>= 2.6.4-0ubuntu1), python-support (>= 1.0.3ubuntu1), python-setuptools
 Standards-Version: 3.8.3.0
 Vcs-Git: git://github.com/jjlee/python-figleaf.git
 Vcs-Browser: http://github.com/jjlee/python-figleaf
+XS-Python-Version: >= 2.6
 
 Package: python-figleaf
 Architecture: all
