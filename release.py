@@ -119,7 +119,7 @@ def next_debian_version(version):
 
 class Releaser(object):
 
-    def __init__(self, env, git_repository_path, release_dir, branch, key,
+    def __init__(self, env, git_repository_path, release_dir, branch,
                  run_in_repository=False):
         self._env = release.GitPagerWrapper(env)
         self._source_repo_path = git_repository_path
