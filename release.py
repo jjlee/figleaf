@@ -226,15 +226,17 @@ allow_unsigned_uploads = 0
                 self._repo_path, "..",
                 "python-figleaf_%s_source.changes" % version)
         print "changes %r" % changes
-        self._env.cmd(["dput", "--config", dput_cf, "figleaf", changes])
+        #self._env.cmd(["dput", "--config", dput_cf, "figleaf", changes])
 
-    def push_tag(self, log):
+    def push(self, log):
+        # TODO: get remote from source repo
+        remote = "git@github.com:jjlee/figleaf.git",
+        # push changelog update
+        self._in_repo.cmd(["git", "push", remote, self._branch])
+        # push tag
         version = self._get_version_from_changelog()
         tag_name = "debian/%s" % sanitize_version(version)
-        self._in_repo.cmd([
-                "git", "push",
-                "git@github.com:jjlee/figleaf.git",
-                "tag", tag_name])
+        self._in_repo.cmd(["git", "push", remote, "tag", tag_name])
 
     def _get_deb_path(self):
         version = self._get_version_from_changelog()
@@ -260,7 +262,7 @@ allow_unsigned_uploads = 0
             self.build_debian_source_package,
             ("debian_test", test.all),
             self.submit_to_ppa,
-            self.push_tag,
+            self.push,
             ]
 
 
