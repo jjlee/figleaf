@@ -226,7 +226,7 @@ allow_unsigned_uploads = 0
                 self._repo_path, "..",
                 "python-figleaf_%s_source.changes" % version)
         print "changes %r" % changes
-        #self._env.cmd(["dput", "--config", dput_cf, "figleaf", changes])
+        self._env.cmd(["dput", "--config", dput_cf, "figleaf", changes])
 
     def push(self, log):
         # TODO: get remote from source repo
