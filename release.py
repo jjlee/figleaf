@@ -253,7 +253,7 @@ allow_unsigned_uploads = 0
 
     def push(self, log):
         # TODO: get remote from source repo
-        remote = "git@github.com:jjlee/figleaf.git",
+        remote = "git@github.com:jjlee/figleaf.git"
         # changelog update
         self._in_repo.cmd(["git", "push", remote, self._branch])
         # pristine-tar data
