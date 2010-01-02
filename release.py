@@ -110,9 +110,9 @@ def next_debian_version(version, upstream_version=None):
 
 class Releaser(object):
 
-    def __init__(self, env, git_repository_path, release_dir, branch,
-                 run_in_repository=False, ignore_new=False,
-                 upstream_version=None):
+    def __init__(self, env, git_repository_path, release_dir,
+                 branch, upstream_branch, upstream_version=None,
+                 run_in_repository=False, ignore_new=False):
         self._env = release.GitPagerWrapper(env)
         self._source_repo_path = git_repository_path
         self._in_source_repo = release.CwdEnv(self._env,
@@ -128,28 +128,29 @@ class Releaser(object):
         self._release_dir = release_dir
         self._in_release_dir = release.CwdEnv(self._env, self._release_dir)
         self._branch = branch
-        self._ignore_new = ignore_new
+        self._upstream_branch = upstream_branch
         self._upstream_version = upstream_version
+        self._ignore_new = ignore_new
 
-    def _git_buildpackage_cmd(self, branch):
+    def _git_buildpackage_cmd(self):
         cmd = ["git-buildpackage",
-                "--git-upstream-branch=%s" % branch,
-                "--git-debian-branch=%s" % branch]
+                "--git-upstream-branch=%s" % self._upstream_branch,
+                "--git-debian-branch=%s" % self._branch]
         if self._ignore_new:
             cmd.append("--git-ignore-new")
         return cmd
 
-    def git_buildpackage_build_cmd(self, branch, key):
-        return self._git_buildpackage_cmd(branch) + [
+    def _git_buildpackage_build_cmd(self):
+        return self._git_buildpackage_cmd() + [
             "--git-pristine-tar",
-            "-k%s" % key,  # for signing packages
+            "-k%s" % self._get_key(),  # for signing packages
             ]
 
-    def git_buildpackage_tag_cmd(self, branch, key):
-        return self._git_buildpackage_cmd(branch) + [
+    def _git_buildpackage_tag_cmd(self):
+        return self._git_buildpackage_cmd() + [
             "--git-tag-only",
             "--git-sign-tags",
-            "--git-keyid=%s" % key,  # for signing tags
+            "--git-keyid=%s" % self._get_key(),  # for signing tags
             ]
 
     def _get_version_from_changelog(self):
@@ -207,12 +208,10 @@ class Releaser(object):
                            "debian/changelog"])
 
     def tag(self, log):
-        self._in_repo.cmd(
-            self.git_buildpackage_tag_cmd(self._branch, self._get_key()))
+        self._in_repo.cmd(self._git_buildpackage_tag_cmd())
 
     def pristine_tar(self, log):
         # TODO: for final release, write empty setup.cfg
-        upstream_branch = self._branch
         self._in_repo.cmd(["python", "setup.py", "sdist", "--formats=gztar"])
         [tarball] = os.listdir(os.path.join(self._repo_path, "dist"))
         version = self._get_version_from_changelog()
@@ -222,17 +221,15 @@ class Releaser(object):
         upstream_version, sep, unused = split_debian_version(version)
         orig = "%s_%s.orig.tar.gz" % (source_package_name, upstream_version)
         self._in_repo.cmd(["mv", os.path.join("dist", tarball), orig])
-        self._in_repo.cmd(["pristine-tar", "commit", orig, upstream_branch])
+        self._in_repo.cmd(["pristine-tar", "commit", orig,
+                           self._upstream_branch])
         self._in_repo.cmd(["rm", orig])
 
     def build_debian_package(self, log):
-        self._in_repo.cmd(
-            self.git_buildpackage_build_cmd(self._branch, self._get_key()))
+        self._in_repo.cmd(self._git_buildpackage_build_cmd())
 
     def build_debian_source_package(self, log):
-        self._in_repo.cmd(
-            self.git_buildpackage_build_cmd(self._branch, self._get_key()) +
-            ["-S"])
+        self._in_repo.cmd(self._git_buildpackage_build_cmd() + ["-S"])
 
     def submit_to_ppa(self, log):
         dput_cf = os.path.join(self._release_dir, "dput.cf")
@@ -302,6 +299,10 @@ def parse_options(args):
     parser.add_option("--branch", metavar="BRANCH",
                       default="master",
                       help="build from git branch BRANCH")
+    parser.add_option("--upstream-branch", metavar="BRANCH",
+                      default=None,
+                      help=("use git branch BRANCH as upstream branch "
+                            "(default is to use same branch as --branch)"))
     parser.add_option("--upstream-version", metavar="VERSION",
                       help=("Update changelog for upstream version VERSION.  "
                             "This will cause the corresponding .orig.tar.gz "
@@ -322,6 +323,8 @@ def parse_options(args):
         options.release_area = remaining_args.pop(0)
     except IndexError:
         parser.error("Expected at least 1 argument, got %d" % nr_args)
+    if options.upstream_branch is None:
+        options.upstream_branch = options.branch
     return options, remaining_args
 
 
@@ -332,8 +335,9 @@ def main(argv):
     if git_repository_path is None:
         git_repository_path = os.getcwd()
     releaser = Releaser(env, git_repository_path, options.release_area,
-                        options.branch, options.in_repository,
-                        options.ignore_new, options.upstream_version)
+                        options.branch, options.upstream_branch,
+                        options.upstream_version,
+                        options.in_repository, options.ignore_new)
     action_tree.action_main(releaser.all, action_tree_args)
 
 
