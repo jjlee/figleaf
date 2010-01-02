@@ -294,8 +294,10 @@ def main():
     start(ignore_pylibs)        # START code coverage
 
     import __main__
+    globs = __main__.__dict__.copy()
+    globs["__file__"] = sys.argv[0]
     try:
-        do_execfile(sys.argv[0], __main__.__dict__)
+        do_execfile(sys.argv[0], globs)
     finally:
         stop()                          # STOP code coverage
 

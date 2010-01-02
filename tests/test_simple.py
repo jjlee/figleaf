@@ -1,5 +1,7 @@
-import sys, os
+import os
 import tempfile, glob
+
+import tests.test_bin_progs.utils
 
 thisdir = os.path.dirname(__file__)
 
@@ -33,3 +35,9 @@ def test_end_comment():
     
     filename = os.path.join(thisdir, 'tst_end_comment.py')
     figleaf.get_lines(open(filename))
+
+def test_magic_file():
+    # __file__ has the correct value in python files run under figleaf
+    filename = os.path.join(thisdir, 'tst_magic_file.py')
+    status, out, errout = tests.test_bin_progs.utils.run("figleaf", filename)
+    assert status == 0
