@@ -75,60 +75,44 @@ def sanitize_version(version):
     return version.replace('~', '.')
 
 
-def _git_buildpackage_cmd(branch):
-    return ["git-buildpackage",
-            "--git-upstream-branch=%s" % branch,
-            "--git-debian-branch=%s" % branch,
-            ]
-
-
-def git_buildpackage_build_cmd(branch, key):
-    return _git_buildpackage_cmd(branch) + [
-        "--git-pristine-tar",
-        "-k%s" % key,  # for signing packages
-        ]
-
-
-def git_buildpackage_tag_cmd(branch, key):
-    return _git_buildpackage_cmd(branch) + [
-        "--git-tag-only",
-        "--git-sign-tags",
-        "--git-keyid=%s" % key,  # for signing tags
-        ]
-
-
 def split_debian_version(debian_version):
     return debian_version.rpartition("-")
 
 
-def next_debian_version(version):
-    # Update the date and a build number in upstream version.  Set ppa build
-    # number to 1.
-    # If you're rebuilding from unchanged .orig.tar.gz, then you need to run
-    # dch -e to edit the changelog by hand to set appropriate N in ppaN suffix
-    # and change the build_num in upstream version back to the version you
-    # want.  TODO: add a commandline option to specifiy upstream version to
-    # use, and do this automatically.
-    upstream_version, sep, debian_version = split_debian_version(version)
+def split_upstream_version(upstream_version):
     rest, date, build_num = upstream_version.rsplit("-", 2)
     assert len(date) == 8, date
     assert rest.endswith(".dev")
-    todays_date = datetime.date.today().strftime("%Y%m%d")
-    if date == todays_date:
-        next_build_num = int(build_num) + 1
-    else:
-        next_build_num = 0
+    return [rest, "-", date, "-", build_num]
+
+
+def next_debian_version(version, upstream_version=None):
+    upstream, sep, debian_version = split_debian_version(version)
     deb_rest, ppa_sep, ppa_num = debian_version.rpartition("~ppa")
-    next_ppa_num = 1
+    if upstream_version is None:
+        # we're building a new .orig.tar.gz, reset ppa build number and
+        # increment .orig.tar.gz build number if required
+        rest, sep2, date, sep3, build_num = split_upstream_version(upstream)
+        todays_date = datetime.date.today().strftime("%Y%m%d")
+        if date == todays_date:
+            next_build_num = int(build_num) + 1
+        else:
+            next_build_num = 0
+        next_ppa_num = 1
+        upstream_version = "".join(
+            [rest, sep2, todays_date, sep3, str(next_build_num)])
+    else:
+        # we're using an existing .orig.tar.gz, increment ppa build number
+        next_ppa_num = int(ppa_num) + 1
     debian_version = "".join([deb_rest, ppa_sep, str(next_ppa_num)])
-    return "".join([rest, "-", todays_date, "-", str(next_build_num),
-                    sep, debian_version])
+    return "".join([upstream_version, sep, debian_version])
 
 
 class Releaser(object):
 
     def __init__(self, env, git_repository_path, release_dir, branch,
-                 run_in_repository=False):
+                 run_in_repository=False, ignore_new=False,
+                 upstream_version=None):
         self._env = release.GitPagerWrapper(env)
         self._source_repo_path = git_repository_path
         self._in_source_repo = release.CwdEnv(self._env,
@@ -144,6 +128,29 @@ class Releaser(object):
         self._release_dir = release_dir
         self._in_release_dir = release.CwdEnv(self._env, self._release_dir)
         self._branch = branch
+        self._ignore_new = ignore_new
+        self._upstream_version = upstream_version
+
+    def _git_buildpackage_cmd(self, branch):
+        cmd = ["git-buildpackage",
+                "--git-upstream-branch=%s" % branch,
+                "--git-debian-branch=%s" % branch]
+        if self._ignore_new:
+            cmd.append("--git-ignore-new")
+        return cmd
+
+    def git_buildpackage_build_cmd(self, branch, key):
+        return self._git_buildpackage_cmd(branch) + [
+            "--git-pristine-tar",
+            "-k%s" % key,  # for signing packages
+            ]
+
+    def git_buildpackage_tag_cmd(self, branch, key):
+        return self._git_buildpackage_cmd(branch) + [
+            "--git-tag-only",
+            "--git-sign-tags",
+            "--git-keyid=%s" % key,  # for signing tags
+            ]
 
     def _get_version_from_changelog(self):
         output = release.get_cmd_stdout(
@@ -179,11 +186,15 @@ class Releaser(object):
                        self._source_repo_path, self._clone_path])
         self._in_clone.cmd(["git", "checkout", self._branch])
 
+    def _next_tag(self):
+        return next_debian_version(self._get_version_from_changelog(),
+                                   self._upstream_version)
+
     def print_next_tag(self, log):
-        print next_debian_version(self._get_version_from_changelog())
+        print self._next_tag()
 
     def update_changelog(self, log):
-        version = next_debian_version(self._get_version_from_changelog())
+        version = self._next_tag()
         name = self._get_from_git_config("user.name")
         email = self._get_from_git_config("user.email")
         entry = "Automated release."
@@ -197,7 +208,7 @@ class Releaser(object):
 
     def tag(self, log):
         self._in_repo.cmd(
-            git_buildpackage_tag_cmd(self._branch, self._get_key()))
+            self.git_buildpackage_tag_cmd(self._branch, self._get_key()))
 
     def pristine_tar(self, log):
         # TODO: for final release, write empty setup.cfg
@@ -216,11 +227,12 @@ class Releaser(object):
 
     def build_debian_package(self, log):
         self._in_repo.cmd(
-            git_buildpackage_build_cmd(self._branch, self._get_key()))
+            self.git_buildpackage_build_cmd(self._branch, self._get_key()))
 
     def build_debian_source_package(self, log):
         self._in_repo.cmd(
-            git_buildpackage_build_cmd(self._branch, self._get_key()) + ["-S"])
+            self.git_buildpackage_build_cmd(self._branch, self._get_key()) +
+            ["-S"])
 
     def submit_to_ppa(self, log):
         dput_cf = os.path.join(self._release_dir, "dput.cf")
@@ -290,11 +302,20 @@ def parse_options(args):
     parser.add_option("--branch", metavar="BRANCH",
                       default="master",
                       help="build from git branch BRANCH")
+    parser.add_option("--upstream-version", metavar="VERSION",
+                      help=("Update changelog for upstream version VERSION.  "
+                            "This will cause the corresponding .orig.tar.gz "
+                            "to be used to build the package.  VERSION is the "
+                            "part of the full debian package version before "
+                            "the final '-'"))
     parser.add_option("--in-source-repository", action="store_true",
                       dest="in_repository",
                       help=("run all commands in original repository "
                             "(specified by --git-repository), rather than in "
                             "the clone of it in the release area"))
+    parser.add_option("--ignore-new", action="store_true",
+                      help=("Allow building packages with uncommitted changes "
+                            "in working tree"))
     options, remaining_args = parser.parse_args(args)
     nr_args = len(remaining_args)
     try:
@@ -311,7 +332,8 @@ def main(argv):
     if git_repository_path is None:
         git_repository_path = os.getcwd()
     releaser = Releaser(env, git_repository_path, options.release_area,
-                        options.branch, options.in_repository)
+                        options.branch, options.in_repository,
+                        options.ignore_new, options.upstream_version)
     action_tree.action_main(releaser.all, action_tree_args)
 
 
